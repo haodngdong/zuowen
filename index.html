@@ -168,7 +168,9 @@ const START=new Date(2026,10,17), EXAM=new Date(2026,11,19);
 const INTERVALS=[1,2,4,7,15,30], NEW_PER_DAY=8, KEY='zuowen_r2';
 let S=(()=>{try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.cards)return d;}catch(e){}
   return {cards:{},essays:{},log:{}};})();
-const save=()=>localStorage.setItem(KEY,JSON.stringify(S));
+let storeOK=true;
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){storeOK=false;
+  if(!window.__warned){window.__warned=1;setTimeout(()=>alert('当前浏览器不允许保存进度（可能是无痕模式或本地文件限制）。\n学习记录不会保存，但内容可以正常看。'),300);}}};
 const today=()=>{const d=new Date();d.setHours(0,0,0,0);return d;};
 const addD=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};
 const iso=d=>d.toISOString().slice(0,10);
