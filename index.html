@@ -116,7 +116,13 @@ nav button{flex:1;border:0;background:none;color:var(--tx3);padding:10px 0 8px;f
 nav button .ic{display:block;font-size:19px;line-height:1.3}
 nav button.on{color:var(--accent)}
 .hidden{display:none!important}
+#toast{position:fixed;left:50%;bottom:calc(96px + var(--safe));transform:translate(-50%,12px);
+  background:#2b3341;color:#fff;padding:11px 20px;border-radius:99px;font-size:14px;font-weight:600;
+  opacity:0;pointer-events:none;transition:.25s;z-index:99;box-shadow:0 6px 24px rgba(0,0,0,.4)}
+#toast.on{opacity:1;transform:translate(-50%,0)}
 .mark{font-size:11px;color:#f0b96b;margin-left:6px;font-weight:700}
+.again{display:inline-block;font-size:11px;margin-left:7px;padding:1px 8px;border-radius:99px;
+  background:#3a2a1c;color:#f0b96b;font-weight:700;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -196,10 +202,13 @@ const addD=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};
 const iso=d=>d.toISOString().slice(0,10);
 const dayNum=()=>Math.floor((today()-START)/864e5)+1;
 const daysLeft=()=>Math.max(0,Math.ceil((EXAM-today())/864e5));
-const st=id=>{if(!S.cards[id])S.cards[id]={box:0,due:iso(today()),seen:0};return S.cards[id];};
+const st=id=>{if(!S.cards[id])S.cards[id]={box:0,due:new Date().toISOString(),seen:0};return S.cards[id];};
+const dueTs=s=>{if(!s||!s.due)return 0;return Date.parse(s.due.length<=10?s.due+'T23:59:59':s.due)||0;};
+const isDue=s=>s&&s.seen>0&&dueTs(s)<=Date.now();
+const HOUR=3600e3;
 
 /* ---------- 队列 ---------- */
-function dueList(){const t=iso(today());return ALL.filter(c=>S.cards[c.id]&&S.cards[c.id].due<=t&&S.cards[c.id].seen>0);}
+function dueList(){return ALL.filter(c=>isDue(S.cards[c.id]));}
 function freshList(){return ALL.filter(c=>!S.cards[c.id]);}
 function buildQueue(){
   const q=dueList().slice();
@@ -238,10 +247,11 @@ function focusOfDay(){
 }
 
 /* ---------- 学习 ---------- */
-let queue=[],idx=0,cur=null;
+let queue=[],idx=0,cur=null,sessTotal=0,sessMastered=0,sessRepeats=0;
 function startQueue(list){
   queue=list.map(c=>c.uname?c:(()=>{const u=U.find(x=>x.cards.some(y=>y.id===c.id));return {...c,unit:u?u.id:'',uname:u?u.name:''};})());
-  idx=0;study.classList.add('on');renderCard();
+  idx=0;sessTotal=new Set(queue.map(c=>c.id)).size;sessMastered=0;sessRepeats=0;
+  study.classList.add('on');renderCard();
 }
 studyStart=()=>startQueue(buildQueue());
 sClose.onclick=()=>{study.classList.remove('on');renderToday();renderUnits();};
@@ -249,17 +259,21 @@ startBtn.onclick=()=>startQueue(buildQueue());
 
 function renderCard(){
   if(idx>=queue.length){
-    host.innerHTML='<div class="done"><div class="em">🎉</div><h2>这一组完成了</h2><p>已学 '+Object.values(S.cards).filter(s=>s.seen>0).length+' / '+ALL.length+' 张</p><button class="btn" onclick="sClose.onclick()">返回</button></div>';
+    host.innerHTML='<div class="done"><div class="em">🎉</div><h2>这一组过完了</h2>'
+      +'<p>共 '+sessTotal+' 张，一次就记住 '+sessMastered+' 张'
+      +(sessRepeats?('<br>另外 '+sessRepeats+' 张会过几小时再出现，到时候再来一遍'):'')+'<br>'
+      +'累计已学 '+Object.values(S.cards).filter(s=>s.seen>0).length+' / '+ALL.length+' 张</p>'
+      +'<button class="btn" onclick="sClose.onclick()">返回</button></div>';
     sCnt.textContent='';return;
   }
   cur=queue[idx];
-  sCnt.textContent=(idx+1)+' / '+queue.length;
+  sCnt.textContent=sessBar();
   const c=cur;
   const isTpl=c.ex!==undefined;
   const cls={'第一段':'','第二段':'c2','第三段':'c3','比喻句':'c4'}[c.uname]||'c2';
   const markBadge=c.mark?`<span class="mark">${c.mark}</span>`:'';
   let inner=`
-    <span class="tag ${cls}">${c.uname}${c.group?' · '+c.group.split(' · ')[0]:''}</span>
+    <span class="tag ${cls}">${c.uname}${c.group?' · '+c.group.split(' · ')[0]:''}</span>${c.__again?`<span class="again">第 ${c.__again+1} 次</span>`:''}
     <h2 class="qname">${c.zh||c.en}${markBadge}</h2>`;
   if(isTpl){
     inner+=`<button class="reveal" id="rv">👀 显示英文模板 + 例句</button>
@@ -320,12 +334,27 @@ function checkSpell(input,answer){
 }
 function hl(t){return t.replace(/\b(Sth1|Sth2|Sth|X|Y1|Y2|A|B|sb|sth)\b/g,'<em>$1</em>');}
 function grade(q){
-  const s=st(cur.id);s.seen++;
-  if(q===0){s.box=0;s.due=iso(addD(today(),1));}
-  else if(q===1){s.due=iso(addD(today(),Math.max(1,Math.round(INTERVALS[Math.min(s.box,5)]/2))));if(s.box<5)s.box++;}
-  else{s.box=Math.min(5,s.box+1);s.due=iso(addD(today(),INTERVALS[Math.min(s.box,5)]));}
-  S.log[iso(today())]=(S.log[iso(today())]||0)+1;save();
+  const c=cur;
+  const s=st(c.id);s.seen++;
+  const now=Date.now();
+  if(q===0){ s.box=0; s.due=new Date(now+2*HOUR).toISOString(); }
+  else if(q===1){ s.due=new Date(now+4*HOUR).toISOString(); if(s.box<5)s.box++; }
+  else { s.box=Math.min(5,s.box+1); s.due=new Date(addD(today(),INTERVALS[Math.min(s.box,5)])).toISOString(); }
+  S.log[iso(today())]=(S.log[iso(today())]||0)+1;
+  if(q===2){ sessMastered++; }
+  else { sessRepeats++; toast(q===0?'2 小时后再来一次':'4 小时后再巩固一下'); }
+  save();
   idx++;renderCard();
+}
+let toastT=null;
+function toast(msg){
+  let el=document.getElementById('toast');
+  if(!el){ el=document.createElement('div'); el.id='toast'; document.body.appendChild(el); }
+  el.textContent=msg; el.classList.add('on');
+  clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('on'),1600);
+}
+function sessBar(){
+  return '已完成 '+Math.min(idx+1,sessTotal)+'/'+sessTotal;
 }
 
 /* ---------- 拼写 ---------- */
@@ -333,7 +362,7 @@ const SPELLABLE = ALL.filter(c=>c.spell);
 let spQueue=[], spIdx=0, spRight=0, spTotal=0, spCur=null;
 function renderSpell(){
   const t=iso(today());
-  const due=SPELLABLE.filter(c=>{const s=S.cards[c.id];return s&&s.seen>0&&s.due<=t;});
+  const due=SPELLABLE.filter(c=>isDue(S.cards[c.id]));
   const fresh=SPELLABLE.filter(c=>!S.cards[c.id]);
   const n=Math.min(12, fresh.length);
   spSub.textContent=SPELLABLE.length+' 个';
@@ -348,7 +377,7 @@ function renderSpell(){
 }
 document.getElementById('spStart').onclick=()=>{
   const t=iso(today());
-  let q=SPELLABLE.filter(c=>{const s=S.cards[c.id];return s&&s.seen>0&&s.due<=t;});
+  let q=SPELLABLE.filter(c=>isDue(S.cards[c.id]));
   const fresh=SPELLABLE.filter(c=>!S.cards[c.id]).slice(0,12);
   q=q.concat(fresh);
   if(!q.length) q=SPELLABLE.slice().sort(()=>Math.random()-.5).slice(0,10);
@@ -358,12 +387,13 @@ document.getElementById('spAll').onclick=()=>startSpell(SPELLABLE.slice());
 
 function startSpell(list){
   spQueue=list; spIdx=0; spRight=0; spTotal=0;
+  sessTotal=new Set(list.map(c=>c.id)).size; sessMastered=0; sessRepeats=0;
   study.classList.add('on'); renderSpellCard();
 }
 function renderSpellCard(){
   if(spIdx>=spQueue.length){ renderSpellDone(); return; }
   spCur=spQueue[spIdx];
-  sCnt.textContent=(spIdx+1)+' / '+spQueue.length;
+  sCnt.textContent=sessBar();
   const c=spCur;
   host.innerHTML=`
     <div class="qcard">
@@ -401,6 +431,7 @@ function renderSpellCard(){
     if(ok){
       document.getElementById('fb').innerHTML='✅ 对了：<span class="cor">'+c.en+'</span>';
       document.getElementById('chk').disabled=true;
+      sessMastered++;
       setTimeout(()=>{gradeCard(c,2);spIdx++;renderSpellCard();},600);
     }else{
       document.getElementById('fb').innerHTML=(tried<2?'❌ 不对，再试一次。':'❌ 答案是：<span class="cor">'+c.en+'</span>');
@@ -414,23 +445,28 @@ function renderSpellCard(){
   document.getElementById('chk').onclick=go;
   inp.onkeydown=e=>{if(e.key==='Enter')go();};
   document.querySelectorAll('#btns button').forEach(b=>b.onclick=()=>{
-    gradeCard(c,+b.dataset.q); spIdx++; renderSpellCard();
+    const q=+b.dataset.q;
+    gradeCard(c,q);
+    if(q===2){ sessMastered++; }
+    else { sessRepeats++; toast(q===0?'2 小时后再拼一次':'4 小时后再拼一次'); }
+    spIdx++; renderSpellCard();
   });
   study.scrollTop=0;
 }
 function renderSpellDone(){
   const lg='sp-'+iso(today()); const d=S.log[lg]||{r:0,t:0};
-  host.innerHTML=`<div class="done"><div class="em">⌨️</div><h2>拼完了</h2>
-    <p>本轮 ${spQueue.length} 个，一次写对 ${spRight} 个${spTotal?('，正确率 '+Math.round(spRight/spTotal*100)+'%'):''}<br>
+  host.innerHTML=`<div class="done"><div class="em">⌨️</div><h2>全部拼对了</h2>
+    <p>${sessTotal} 个词全部过关${sessRepeats?('，重复了 '+sessRepeats+' 次'):'，一次就过'}${spTotal?('，正确率 '+Math.round(spRight/spTotal*100)+'%'):''}<br>
     今天累计拼写 ${d.t} 次，正确 ${d.r} 次</p>
     <button class="btn" onclick="sClose.onclick()">返回</button></div>`;
   sCnt.textContent='';
 }
 function gradeCard(c,q){
   const s=st(c.id); s.seen++;
-  if(q===0){s.box=0;s.due=iso(addD(today(),1));}
-  else if(q===1){s.due=iso(addD(today(),Math.max(1,Math.round(INTERVALS[Math.min(s.box,5)]/2))));if(s.box<5)s.box++;}
-  else{s.box=Math.min(5,s.box+1);s.due=iso(addD(today(),INTERVALS[Math.min(s.box,5)]));}
+  const now=Date.now();
+  if(q===0){ s.box=0; s.due=new Date(now+2*HOUR).toISOString(); }
+  else if(q===1){ s.due=new Date(now+4*HOUR).toISOString(); if(s.box<5)s.box++; }
+  else { s.box=Math.min(5,s.box+1); s.due=new Date(addD(today(),INTERVALS[Math.min(s.box,5)])).toISOString(); }
   save();
 }
 
@@ -467,7 +503,7 @@ function renderUnits(){
 function openUnit(uid){
   const u=U.find(x=>x.id===uid);
   const unseen=u.cards.filter(c=>!S.cards[c.id]);
-  const due=u.cards.filter(c=>S.cards[c.id]&&S.cards[c.id].due<=iso(today()));
+  const due=u.cards.filter(c=>isDue(S.cards[c.id]));
   let list=unseen.length?unseen:due.length?due:u.cards.slice().sort(()=>Math.random()-.5).slice(0,10);
   startQueue(list);
 }
