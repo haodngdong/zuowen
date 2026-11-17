@@ -260,8 +260,9 @@ startBtn.onclick=()=>startQueue(buildQueue());
 function renderCard(){
   if(idx>=queue.length){
     host.innerHTML='<div class="done"><div class="em">🎉</div><h2>这一组过完了</h2>'
-      +'<p>共 '+sessTotal+' 张，一次就记住 '+sessMastered+' 张'
-      +(sessRepeats?('<br>另外 '+sessRepeats+' 张会过几小时再出现，到时候再来一遍'):'')+'<br>'
+      +'<p>共 '+sessTotal+' 张：一次就记住 '+sessMastered+' 张'
+      +(sessRepeats?('，反复了 '+sessRepeats+' 次'):'')+'<br>'
+      +'反复过的 '+sessRepeats+' 张，<b>4 小时后还会再出现一次</b>，到时候记得再来<br>'
       +'累计已学 '+Object.values(S.cards).filter(s=>s.seen>0).length+' / '+ALL.length+' 张</p>'
       +'<button class="btn" onclick="sClose.onclick()">返回</button></div>';
     sCnt.textContent='';return;
@@ -339,12 +340,21 @@ function grade(q){
   const now=Date.now();
   if(q===0){ s.box=0; s.due=new Date(now+2*HOUR).toISOString(); }
   else if(q===1){ s.due=new Date(now+4*HOUR).toISOString(); if(s.box<5)s.box++; }
-  else { s.box=Math.min(5,s.box+1); s.due=new Date(addD(today(),INTERVALS[Math.min(s.box,5)])).toISOString(); }
+  else {
+    if(c.__lapsed){ s.due=new Date(now+4*HOUR).toISOString(); s.box=Math.max(1,s.box); }
+    else { s.box=Math.min(5,s.box+1); s.due=new Date(addD(today(),INTERVALS[Math.min(s.box,5)])).toISOString(); }
+  }
   S.log[iso(today())]=(S.log[iso(today())]||0)+1;
   if(q===2){ sessMastered++; }
-  else { sessRepeats++; toast(q===0?'2 小时后再来一次':'4 小时后再巩固一下'); }
+  else { sessRepeats++; requeue(c,q); }
   save();
   idx++;renderCard();
+}
+function requeue(c,q){
+  const item={...c,__again:(c.__again||0)+1,__lapsed:true};
+  // 忘了 → 队尾；模糊 → 4 张之后
+  const at = q===0 ? queue.length : Math.min(queue.length, idx+5);
+  queue.splice(at,0,item);
 }
 let toastT=null;
 function toast(msg){
@@ -448,7 +458,12 @@ function renderSpellCard(){
     const q=+b.dataset.q;
     gradeCard(c,q);
     if(q===2){ sessMastered++; }
-    else { sessRepeats++; toast(q===0?'2 小时后再拼一次':'4 小时后再拼一次'); }
+    else {
+      sessRepeats++;
+      const item={...c,__again:(c.__again||0)+1,__lapsed:true};
+      const at = q===0 ? spQueue.length : Math.min(spQueue.length, spIdx+5);
+      spQueue.splice(at,0,item);
+    }
     spIdx++; renderSpellCard();
   });
   study.scrollTop=0;
@@ -456,7 +471,7 @@ function renderSpellCard(){
 function renderSpellDone(){
   const lg='sp-'+iso(today()); const d=S.log[lg]||{r:0,t:0};
   host.innerHTML=`<div class="done"><div class="em">⌨️</div><h2>全部拼对了</h2>
-    <p>${sessTotal} 个词全部过关${sessRepeats?('，重复了 '+sessRepeats+' 次'):'，一次就过'}${spTotal?('，正确率 '+Math.round(spRight/spTotal*100)+'%'):''}<br>
+    <p>${sessTotal} 个词全部过关${sessRepeats?('，反复了 '+sessRepeats+' 次，4 小时后还会再出现'):'，一次就过'}${spTotal?('，正确率 '+Math.round(spRight/spTotal*100)+'%'):''}<br>
     今天累计拼写 ${d.t} 次，正确 ${d.r} 次</p>
     <button class="btn" onclick="sClose.onclick()">返回</button></div>`;
   sCnt.textContent='';
@@ -466,7 +481,10 @@ function gradeCard(c,q){
   const now=Date.now();
   if(q===0){ s.box=0; s.due=new Date(now+2*HOUR).toISOString(); }
   else if(q===1){ s.due=new Date(now+4*HOUR).toISOString(); if(s.box<5)s.box++; }
-  else { s.box=Math.min(5,s.box+1); s.due=new Date(addD(today(),INTERVALS[Math.min(s.box,5)])).toISOString(); }
+  else {
+    if(c.__lapsed){ s.due=new Date(now+4*HOUR).toISOString(); s.box=Math.max(1,s.box); }
+    else { s.box=Math.min(5,s.box+1); s.due=new Date(addD(today(),INTERVALS[Math.min(s.box,5)])).toISOString(); }
+  }
   save();
 }
 
